@@ -15,7 +15,4 @@ app.use('/api/lessons', lessonsRoutes);
 app.use('/api/subjects', subjectsRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/teams', teamRoutes);
-const PORT = process.env.PORT || 5000;
-app.listen(PORT, () => {
-    console.log(`🚀 Server running with TypeScript at: http://localhost:${PORT}`);
-});
+export default app;
