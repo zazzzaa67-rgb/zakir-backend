@@ -182,11 +182,7 @@ async function startBatchProcess() {
 
       // 3. معالجة وتوليد المذكرات بواسطة Gemini و Puppeteer
         console.log(`⚡ جاري التوليد واستخراج الدروس وتوليد المذكرات...`);
-        await processBookPDF(tempFilePath, book.subjectId, book.title, {
-          sourceUrl: book.url,
-          sourceName: 'وزارة التربية والتعليم المصرية',
-          term: 1,
-        });
+        await processBookPDF(tempFilePath, book.subjectId, book.title);
 
         console.log(`✅ اكتملت معالجة [${book.title}] بنجاح!\n`);
 

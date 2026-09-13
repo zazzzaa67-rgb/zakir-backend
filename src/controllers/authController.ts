@@ -40,10 +40,20 @@ export const signUp = async (req: Request, res: Response) => {
       email,
       password,
       email_confirm: true,
+      user_metadata: {
+        display_name: displayName,
+        gender,
+        grade_level: Number(gradeLevel),
+        track_id: trackId,
+      },
     });
     if (authError || !authData.user) {
       console.error('❌ فشل إنشاء حساب Supabase:', authError?.message ?? 'unknown error');
-      const errorMessage = authError?.message?.toLowerCase().includes('already registered')
+      const authErrorMessage = authError?.message?.toLowerCase() ?? '';
+      const isDuplicateEmail = authErrorMessage.includes('already registered')
+        || authErrorMessage.includes('already exists')
+        || authErrorMessage.includes('email_exists');
+      const errorMessage = isDuplicateEmail
         ? 'هذا البريد الإلكتروني مسجل بالفعل. استخدم تسجيل الدخول أو بريدًا آخر.'
         : authError?.message ?? 'تعذر إنشاء الحساب';
       return res.status(400).json({ error: errorMessage });
@@ -82,8 +92,32 @@ export const signIn = async (req: Request, res: Response) => {
       : 'البريد الإلكتروني أو كلمة المرور غير صحيحة. لو الحساب جديد، أنشئه أولا ببريد غير مستخدم.';
     return res.status(401).json({ error: errorMessage });
   }
-  const { data: profile, error: profileError } = await supabase.from('student_profiles').select('*').eq('id', data.user.id).single();
-  if (profileError) return res.status(404).json({ error: 'ملف الطالب غير مكتمل' });
+  let { data: profile, error: profileError } = await supabase.from('student_profiles').select('*').eq('id', data.user.id).maybeSingle();
+  if (profileError) return res.status(500).json({ error: 'تعذر تحميل بيانات الطالب.' });
+
+  if (!profile) {
+    const metadata = data.user.user_metadata ?? {};
+    const displayName = String(metadata.display_name ?? '').trim();
+    const gender = metadata.gender;
+    const gradeLevel = Number(metadata.grade_level);
+    const trackId = String(metadata.track_id ?? '');
+    const hasProfileData = Boolean(displayName && ['boy', 'girl'].includes(gender) && [1, 2, 3].includes(gradeLevel) && trackId);
+
+    if (hasProfileData) {
+      const { data: repairedProfile, error: repairError } = await supabase.from('student_profiles').upsert({
+        id: data.user.id,
+        display_name: displayName,
+        gender,
+        grade_level: gradeLevel,
+        track_id: trackId,
+      }).select().single();
+      if (repairError) return res.status(500).json({ error: 'تعذر إنشاء بيانات الطالب تلقائيا.' });
+      profile = repairedProfile;
+    } else {
+      return res.status(409).json({ error: 'هذا الحساب يحتاج إكمال بيانات الطالب مرة واحدة.' });
+    }
+  }
+
   return res.json({ accessToken: data.session.access_token, refreshToken: data.session.refresh_token, profile: publicProfile(profile) });
 };
 

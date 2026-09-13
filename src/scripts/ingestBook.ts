@@ -4,10 +4,7 @@ import { supabase } from '../config/supabase.js';
 import { generateAndSaveImage } from '../services/imageService.js';
 import { generateLessonPDF } from '../services/pdfService.js';
 
-// 1️⃣ استخدام الموديل المستقر والسريع
-const GEMINI_MODEL = 'gemini-3.5-flash-lite';
-const exhaustedGeminiClients = new Set<number>();
-let nextGeminiClientIndex = 0;
+const GEMINI_MODEL = 'gemini-3.6-flash';
 
 function delay(milliseconds: number): Promise<void> {
   return new Promise((resolve) => setTimeout(resolve, milliseconds));
@@ -53,19 +50,13 @@ type GeminiSession = {
   filePart: GeminiFilePart;
 };
 
-export interface BookIngestionMetadata {
-  sourceUrl?: string;
-  sourceName?: string;
-  term?: number;
-}
-
 async function uploadPdfWithClient(clientIndex: number, filePath: string): Promise<GeminiFilePart> {
   const uploadedFile = await withTimeout(
     geminiClients[clientIndex].files.upload({
       file: filePath,
       config: { mimeType: 'application/pdf' },
     }),
-    120_000,
+    60_000,
     `Gemini PDF upload (project ${clientIndex + 1})`,
   );
 
@@ -84,13 +75,9 @@ async function uploadPdfWithClient(clientIndex: number, filePath: string): Promi
 async function createGeminiSession(filePath: string): Promise<GeminiSession> {
   let lastError: unknown;
 
-  for (let attempt = 0; attempt < geminiClients.length; attempt++) {
-    const clientIndex = (nextGeminiClientIndex + attempt) % geminiClients.length;
-    if (exhaustedGeminiClients.has(clientIndex)) continue;
-
+  for (let clientIndex = 0; clientIndex < geminiClients.length; clientIndex++) {
     try {
       console.log(`📤 جاري رفع الملف عبر مشروع Gemini رقم ${clientIndex + 1}...`);
-      nextGeminiClientIndex = clientIndex;
       return {
         filePath,
         clientIndex,
@@ -98,43 +85,30 @@ async function createGeminiSession(filePath: string): Promise<GeminiSession> {
       };
     } catch (error) {
       lastError = error;
-      if (isGeminiQuotaError(error)) {
-        exhaustedGeminiClients.add(clientIndex);
-      }
-      console.warn(`⚠️ تعذر استخدام مشروع Gemini رقم ${clientIndex + 1}، جاري تجربة المشروع التالي...`);
+      if (!isGeminiQuotaError(error) || clientIndex === geminiClients.length - 1) throw error;
+      console.warn(`⚠️ انتهت حصة مشروع Gemini رقم ${clientIndex + 1}، سيتم استخدام المشروع التالي.`);
     }
   }
 
-  throw lastError ?? new Error('نفدت مفاتيح Gemini المتاحة حاليا.');
+  throw lastError ?? new Error('No Gemini project is available');
 }
 
-async function switchGeminiProject(session: GeminiSession, exhaustCurrent: boolean): Promise<void> {
-  if (exhaustCurrent) {
-    exhaustedGeminiClients.add(session.clientIndex);
+async function switchGeminiProject(session: GeminiSession): Promise<void> {
+  const nextClientIndex = session.clientIndex + 1;
+  if (nextClientIndex >= geminiClients.length) {
+    throw new Error('All configured Gemini projects have exhausted their quota.');
   }
 
-  for (let offset = 1; offset <= geminiClients.length; offset++) {
-    const candidateIndex = (session.clientIndex + offset) % geminiClients.length;
-    if (exhaustedGeminiClients.has(candidateIndex)) continue;
-
-    console.warn(`🔁 التبديل إلى مشروع Gemini رقم ${candidateIndex + 1} وإعادة رفع الملف...`);
-    session.clientIndex = candidateIndex;
-    nextGeminiClientIndex = candidateIndex;
-    session.filePart = await uploadPdfWithClient(candidateIndex, session.filePath);
-    return;
-  }
-
-  throw new Error('نفدت كل مفاتيح Gemini المجانية المتاحة حاليا.');
+  console.warn(`🔁 التبديل إلى مشروع Gemini رقم ${nextClientIndex + 1} وإعادة رفع الملف...`);
+  session.clientIndex = nextClientIndex;
+  session.filePart = await uploadPdfWithClient(nextClientIndex, session.filePath);
 }
 
-// 2️⃣ التبديل الفوري للمفتاح التالي عند خطأ 503 أو 429 أو Timeout
 async function generateContentWithRetry(
   request: GenerateContentParameters,
   session: GeminiSession,
 ) {
-  const maxAttempts = geminiClients.length;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+  for (let attempt = 0; attempt <= 3; attempt++) {
     try {
       return await withTimeout(
         geminiClients[session.clientIndex].models.generateContent({
@@ -144,94 +118,43 @@ async function generateContentWithRetry(
             ...(Array.isArray(request.contents) ? request.contents.slice(1) : [request.contents]),
           ] as GenerateContentParameters['contents'],
         }),
-        180_000, // 3 دقائق مهلة كافية للتوليد
+        60_000,
         'Gemini content generation',
       );
     } catch (error) {
-      console.warn(`⚠️ [مشروع ${session.clientIndex + 1}] حدث خطأ أثناء التوليد. جارِ التبديل...`);
-
-      if (isGeminiQuotaError(error) || isRetryableGeminiError(error)) {
-        await switchGeminiProject(session, isGeminiQuotaError(error));
-        await delay(1000);
+      if (isGeminiQuotaError(error) && session.clientIndex < geminiClients.length - 1) {
+        await switchGeminiProject(session);
         continue;
       }
-      
-      throw error;
+      if (attempt === 3 || !isRetryableGeminiError(error)) throw error;
+      const backoffMs = 3_000 + attempt * 1_000;
+      console.warn(`⚠️ Gemini זמני ולא זמין. ניסיון חוזר בעוד ${backoffMs / 1000} שניות...`, error);
+      await delay(backoffMs);
     }
   }
 
-  throw new Error('Gemini generation failed after exhausting all keys');
+  throw new Error('Gemini generation failed after retries');
 }
 
-export async function processBookPDF(
-  filePath: string,
-  subjectId: string,
-  bookTitle: string,
-  metadata: BookIngestionMetadata = {},
-) {
-  let bookRecordId: string | undefined;
-
+export async function processBookPDF(filePath: string, subjectId: string, bookTitle: string) {
   try {
     console.log(`\n🚀 بدء معالجة كتاب: [${bookTitle}]...`);
-
-    let existingBookQuery = supabase
+    // 1. تسجيل الكتاب
+    const { data: bookRecord, error: bookError } = await supabase
       .from('books')
-      .select('id, status')
-      .eq('subject_id', subjectId)
-      .eq('title', bookTitle);
+      .insert([{ subject_id: subjectId, title: bookTitle, status: 'processing' }])
+      .select()
+      .single();
 
-    if (metadata.sourceUrl) {
-      existingBookQuery = existingBookQuery.eq('source_url', metadata.sourceUrl);
-    }
+    if (bookError) throw bookError;
 
-    const { data: existingBook, error: lookupError } = await existingBookQuery.maybeSingle();
-
-    if (lookupError) throw lookupError;
-    if (existingBook?.status === 'completed') {
-      console.log(`⏩ الكتاب [${bookTitle}] مكتمل بالفعل، لن تتم معالجته مرة أخرى.`);
-      return;
-    }
-
-    if (existingBook) {
-      bookRecordId = existingBook.id;
-      const { error: resetError } = await supabase
-        .from('books')
-        .update({ status: 'processing' })
-        .eq('id', bookRecordId);
-      if (resetError) throw resetError;
-    } else {
-      const { data: bookRecord, error: bookError } = await supabase
-        .from('books')
-        .insert([{
-          subject_id: subjectId,
-          title: bookTitle,
-          status: 'processing',
-          source_url: metadata.sourceUrl ?? null,
-          source_name: metadata.sourceName ?? 'وزارة التربية والتعليم المصرية',
-          term: metadata.term ?? null,
-        }])
-        .select('id')
-        .single();
-      if (bookError) throw bookError;
-      bookRecordId = bookRecord.id;
-    }
-
-    const { data: existingLessons, error: existingLessonsError } = await supabase
-      .from('lessons')
-      .select('source_order')
-      .eq('book_id', bookRecordId);
-    if (existingLessonsError) throw existingLessonsError;
-    const existingLessonOrders = new Set(
-      (existingLessons ?? [])
-        .map((lesson) => lesson.source_order)
-        .filter((order): order is number => typeof order === 'number'),
-    );
-
+    // 2. رفع PDF المنهج إلى Gemini
     console.log(`📤 جاري رفع الملف إلى Gemini File API...`);
     const session = await createGeminiSession(filePath);
 
     console.log(`✅ تم رفع الملف. جاري استخراج شجرة الوحدات والدروس...`);
 
+    // 3. تفكيك الفهرس
     const outlineResponse = await generateContentWithRetry({
       model: GEMINI_MODEL,
       contents: [session.filePart, 'قم بتحليل هذا الكتاب المدرسي بالكامل واستخراج كافة الوحدات والدروس بصيغة JSON.'],
@@ -260,37 +183,19 @@ export async function processBookPDF(
     }>;
     console.log(`📚 تم إيجاد ${lessonsOutline.length} درس. جاري التوليد التفاعلي المتكامل...`);
 
-    let createdCount = existingLessonOrders.size;
+    let createdCount = 0;
 
     const systemInstruction = `
 أنت معلم مصري عبقري ومصمم مناهج تفاعلية للثانوية العامة.
 تتميز بالشرح الممتع واستخدام اللغة المصرية الشبابية البسيطة والذكية ("يا بطل"، "الزتونة"، "تركة امتحان"، "ركز في دي").
-  اكتب النص العربي بدون أي تشكيل أو حركات. لا تختصر أي نقطة علمية مهمة من المصدر.
-  اهتم باللهجة المصرية والشرح الشيق، واشرح كل مصطلح وقاعدة خطوة بخطوة.
-  لا تنشئ أي فيديو أو صوت؛ المحتوى نصي وتفاعلي فقط.`;
+إضافة التشكيل الإعرابي الكامل (الحركات: فتحة، ضمة، كسرة، سكون، شدة) على جميع النصوص العربية في الشرائح وحوار الشخصية لضمان صحة النطق الصوتي.و بردك عايزك تهتم ملهجة المصرية و تهتم بالشرح الشيق الممتع  وتركز علي النقاط المهمة و شرح كل نقطة في الدرس تبقا لمعايير الكتاب  `;
 
+    // 4. التكرار على الدروس درساً درساً
     for (let i = 0; i < lessonsOutline.length; i++) {
       const item = lessonsOutline[i];
-      if (existingLessonOrders.has(i + 1)) {
-        console.log(`⏩ الدرس ${i + 1} موجود مسبقاً، جاري التخطي...`);
-        continue;
-      }
       console.log(`\n⏳ [${i + 1}/${lessonsOutline.length}] معالجة درس: (${item.unit_title} - ${item.lesson_title})...`);
 
-      const lessonPrompt = `
-    قم بتوليد مذكرة شرح كاملة وليست ملخصا قصيرا للدرس التالي من الكتاب المرفق:
-    الوحدة: ${item.unit_title}
-    الدرس: ${item.lesson_title}
-    السياق المستخرج من الكتاب: ${item.lesson_summary_context}
-
-    التزم بكل المعلومات الواردة في الجزء الخاص بالدرس. قسم الشرح إلى أجزاء منطقية،
-    واشرح التعريفات والقوانين والعلاقات والأسباب والنتائج بالتفصيل. أضف أمثلة محلولة
-    بخطواتها، ثم أخطاء شائعة وتركات امتحان.
-    أنشئ امتحانا مستقلا من 10 أسئلة بالضبط، وواجبا مستقلا من 15 سؤالا بالضبط.
-    اجعل كل سؤال اختيارا من متعدد بأربع اختيارات، وحدد الإجابة الصحيحة والشرح.
-    يجب أن يقيس الامتحان فهم الدرس، بينما يتدرج الواجب من السهل إلى الصعب للتدريب.
-    يجب أن يكون المحتوى كافيا للمذاكرة من الـ PDF وحده، وباللهجة المصرية الشبابية، وبدون تشكيل.
-    `;
+      const lessonPrompt = `قم بتوليد محتوى الدرس تفصيلياً و عايزة ممتعا و شيق وبللهجة المصرية الشبابية بناءً على المرفق: ${item.unit_title} - ${item.lesson_title}`;
 
       const lessonContentResponse = await generateContentWithRetry({
         model: GEMINI_MODEL,
@@ -309,53 +214,6 @@ export async function processBookPDF(
                 type: Type.OBJECT,
                 properties: {
                   summary: { type: Type.STRING },
-                  detailed_explanation: { type: Type.STRING },
-                  key_points: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  laws_and_rules: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  common_mistakes: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  exam_tricks: { type: Type.ARRAY, items: { type: Type.STRING } },
-                  worked_examples: {
-                    type: Type.ARRAY,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        title: { type: Type.STRING },
-                        steps: { type: Type.ARRAY, items: { type: Type.STRING } },
-                        answer: { type: Type.STRING }
-                      },
-                      required: ['title', 'steps', 'answer']
-                    }
-                  },
-                  exam: {
-                    type: Type.ARRAY,
-                    minItems: 10,
-                    maxItems: 10,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        question: { type: Type.STRING },
-                        options: { type: Type.ARRAY, minItems: 4, maxItems: 4, items: { type: Type.STRING } },
-                        correct_index: { type: Type.INTEGER },
-                        explanation: { type: Type.STRING }
-                      },
-                      required: ['question', 'options', 'correct_index', 'explanation']
-                    }
-                  },
-                  homework: {
-                    type: Type.ARRAY,
-                    minItems: 15,
-                    maxItems: 15,
-                    items: {
-                      type: Type.OBJECT,
-                      properties: {
-                        question: { type: Type.STRING },
-                        options: { type: Type.ARRAY, minItems: 4, maxItems: 4, items: { type: Type.STRING } },
-                        correct_index: { type: Type.INTEGER },
-                        explanation: { type: Type.STRING }
-                      },
-                      required: ['question', 'options', 'correct_index', 'explanation']
-                    }
-                  },
                   slides: {
                     type: Type.ARRAY,
                     items: {
@@ -391,6 +249,19 @@ export async function processBookPDF(
                       required: ['title', 'description', 'prompt_for_visual']
                     }
                   },
+                  video_script: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        scene_number: { type: Type.INTEGER },
+                        visual_description: { type: Type.STRING },
+                        narration_text: { type: Type.STRING },
+                        ai_image_prompt: { type: Type.STRING }
+                      },
+                      required: ['scene_number', 'visual_description', 'narration_text', 'ai_image_prompt']
+                    }
+                  },
                   quiz: {
                     type: Type.ARRAY,
                     items: {
@@ -405,11 +276,7 @@ export async function processBookPDF(
                     }
                   }
                 },
-                required: [
-                  'summary', 'detailed_explanation', 'key_points', 'laws_and_rules',
-                  'common_mistakes', 'exam_tricks', 'worked_examples', 'exam', 'homework',
-                  'slides', 'diagrams', 'quiz'
-                ]
+                required: ['summary', 'slides', 'diagrams', 'video_script', 'quiz']
               }
             },
             required: ['difficulty', 'duration_minutes', 'points_reward', 'coins_cost', 'content']
@@ -420,33 +287,43 @@ export async function processBookPDF(
       if (!lessonContentResponse.text) throw new Error(`Gemini returned empty content for ${item.lesson_title}`);
       const generatedData = JSON.parse(lessonContentResponse.text);
 
-      // 3️⃣ توليد صور السلايدات بالتوازي (Parallel) لختصار الوقت
-      console.log(`🎨 جاري توليد صور السلايدات بالتوازي...`);
-      await Promise.all(
-        generatedData.content.slides.map(async (slide: any, s: number) => {
-          if (slide.visual_theme?.illustration_prompt) {
-            const imageUrl = await generateAndSaveImage(
-              slide.visual_theme.illustration_prompt,
-              `slide_${i}_${s}`
-            );
-            slide.visual_theme.illustration_prompt = imageUrl;
-          }
-        })
-      );
+      // 🎨 توليد الصور الحقيقية للـ Slides والـ Video Scenes
+      console.log(`🎨 جاري توليد الصور بالذكاء الاصطناعي للسلايدات والمشاهد...`);
+      for (let s = 0; s < generatedData.content.slides.length; s++) {
+        const slide = generatedData.content.slides[s];
+        const imageUrl = await generateAndSaveImage(
+          slide.visual_theme.illustration_prompt,
+          `slide_${i}_${s}`
+        );
+        slide.visual_theme.illustration_prompt = imageUrl;
+      }
 
+      for (let v = 0; v < generatedData.content.video_script.length; v++) {
+        const scene = generatedData.content.video_script[v];
+        const sceneImageUrl = await generateAndSaveImage(
+          scene.ai_image_prompt,
+          `scene_${i}_${v}`
+        );
+        scene.ai_image_prompt = sceneImageUrl;
+      }
+
+      const tempLessonId = `lesson_${Date.now()}`;
+
+      // 📄 توليد مذكرة الـ PDF الملهمة للدرس
       console.log(`📄 جاري تصميم وإنشاء مذكرة الـ PDF للدرس...`);
       const pdfUrl = await generateLessonPDF(
         item.lesson_title,
         item.unit_title,
         generatedData.content,
-        `lesson_${Date.now()}`
+        tempLessonId
       );
       generatedData.content.pdf_summary_url = pdfUrl;
 
-      const { error: lessonError } = await supabase.from('lessons').insert([
+      // 💾 التخزين النهائي في Supabase
+      await supabase.from('lessons').insert([
         {
           subject_id: subjectId,
-          book_id: bookRecordId,
+          book_id: bookRecord.id,
           unit_title: item.unit_title,
           chapter_name: item.unit_title,
           lesson_title: item.lesson_title,
@@ -455,30 +332,27 @@ export async function processBookPDF(
           points_reward: generatedData.points_reward,
           coins_cost: generatedData.coins_cost || 15,
           order_index: i + 1,
-          source_order: i + 1,
-          generation_status: 'completed',
           content_json: generatedData.content
         }
       ]);
-      if (lessonError) throw lessonError;
 
-      console.log(`✅ تم الانتهاء من الدرس ${i + 1} بنجاح!`);
+      console.log(`✅ تم الانتهاء من إنشاء الدرس والتصاميم والـ PDF والفيديو بنجاح!`);
       createdCount++;
     }
 
     await supabase
       .from('books')
       .update({ status: 'completed', total_lessons_generated: createdCount })
-      .eq('id', bookRecordId);
+      .eq('id', bookRecord.id);
 
-    console.log(`\n🎉 اكتملت المعالجة لكتاب [${bookTitle}] بنجاح! 🎉\n`);
+    console.log(`\n🎉 اكتملت العملية الشاملة للكتاب [${bookTitle}] بنجاح! 🎉\n`);
   } catch (error) {
-    console.error('❌ حدث خطأ أثناء المعالجة:', error);
-    if (bookRecordId) {
-      await supabase
-        .from('books')
-        .update({ status: 'failed' })
-        .eq('id', bookRecordId);
+    if (isGeminiQuotaError(error)) {
+      console.error(
+        '❌ انتهت حصة Gemini الحالية (429). انتظر تجدد الحصة اليومية أو فعّل الفوترة/استخدم مشروعًا بحصة متاحة. لن تتم إعادة المحاولة تلقائيًا.',
+      );
+    } else {
+      console.error('❌ حدث خطأ أثناء المعالجة:', error);
     }
     throw error;
   }
