@@ -40,7 +40,7 @@ export const getLessonById = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { data, error } = await supabase
     .from('lessons')
-    .select('*')
+    .select('*, books(id, title, source_url, status)')
     .eq('id', id)
     .single();
     if (error) return res.status(404).json({ error: 'الدرس غير موجود' });
@@ -84,7 +84,7 @@ export const chatAboutLesson = async (req: Request, res: Response) => {
             .join('\n');
 
         const response = await ai.models.generateContent({
-            model: 'gemini-3.5-flash-lite',
+            model: 'gemini-2.5-flash',
             contents: `محتوى الدرس:\n${JSON.stringify(safeContent)}\n\nالمحادثة السابقة:\n${conversation}\n\nسؤال الطالب:\n${message}`,
             config: {
                 systemInstruction: `
