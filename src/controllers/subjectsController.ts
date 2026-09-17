@@ -40,36 +40,9 @@ export const getSubjectsByTrack = async (req: Request, res: Response) => {
         });
     }
 
-    // Keep older databases usable when a track has not been mapped yet.
+    // A missing mapping is a data problem; never expose every subject in the grade.
     if (subjects.length === 0) {
-        const { data: track, error: fallbackTrackError } = await supabase
-            .from('tracks')
-            .select('grade_level')
-            .eq('id', track_id as string)
-            .maybeSingle();
-        if (fallbackTrackError) return res.status(500).json({ error: fallbackTrackError.message });
-
-        if (track?.grade_level) {
-            const { data: fallbackData, error: fallbackError } = await supabase
-                .from('subjects')
-                .select('id, title, grade, grade_level, subject_code, education_system')
-                .eq('grade_level', track.grade_level);
-            if (fallbackError) return res.status(500).json({ error: fallbackError.message });
-
-            const fallbackSubjectIds = (fallbackData ?? []).map((subject: any) => subject.id);
-            const { data: fallbackBooks, error: booksError } = fallbackSubjectIds.length > 0
-                ? await supabase
-                    .from('books')
-                    .select('id, subject_id, title, status, source_url, term, total_lessons_generated')
-                    .in('subject_id', fallbackSubjectIds)
-                : { data: [], error: null };
-            if (booksError) return res.status(500).json({ error: booksError.message });
-
-            subjects = (fallbackData ?? []).map((subject: any) => ({
-                ...subject,
-                books: (fallbackBooks ?? []).filter((book: any) => book.subject_id === subject.id),
-            }));
-        }
+        return res.json([]);
     }
     res.json(subjects);
 };

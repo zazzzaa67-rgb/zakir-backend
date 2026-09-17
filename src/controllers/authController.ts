@@ -93,7 +93,10 @@ export const signIn = async (req: Request, res: Response) => {
     return res.status(401).json({ error: errorMessage });
   }
   let { data: profile, error: profileError } = await supabase.from('student_profiles').select('*').eq('id', data.user.id).maybeSingle();
-  if (profileError) return res.status(500).json({ error: 'تعذر تحميل بيانات الطالب.' });
+  if (profileError) {
+    console.error('❌ فشل تحميل student_profiles:', profileError.message, profileError.details ?? '');
+    return res.status(500).json({ error: 'تعذر تحميل بيانات الطالب. تأكد من تطبيق migration 004 على مشروع Supabase الصحيح.' });
+  }
 
   if (!profile) {
     const metadata = data.user.user_metadata ?? {};
@@ -111,7 +114,22 @@ export const signIn = async (req: Request, res: Response) => {
         grade_level: gradeLevel,
         track_id: trackId,
       }).select().single();
-      if (repairError) return res.status(500).json({ error: 'تعذر إنشاء بيانات الطالب تلقائيا.' });
+      if (repairError) {
+        console.error('❌ فشل إصلاح student_profiles:', {
+          message: repairError.message,
+          details: repairError.details,
+          hint: repairError.hint,
+          code: repairError.code,
+          userId: data.user.id,
+          trackId,
+        });
+        const missingTable = repairError.code === '42P01' || repairError.message.toLowerCase().includes('student_profiles');
+        return res.status(500).json({
+          error: missingTable
+            ? 'جدول بيانات الطلاب غير موجود أو غير محدث. طبّق migration 004 في Supabase ثم أعد النشر.'
+            : 'تعذر حفظ بيانات الطالب. راجع إعداد SUPABASE_SERVICE_KEY ووجود المسار المختار في جدول tracks.',
+        });
+      }
       profile = repairedProfile;
     } else {
       return res.status(409).json({ error: 'هذا الحساب يحتاج إكمال بيانات الطالب مرة واحدة.' });

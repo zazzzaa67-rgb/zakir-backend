@@ -17,7 +17,6 @@ function withTimeout<T>(promise: Promise<T>, timeoutMs: number, operation: strin
   });
 
   return Promise.race([promise, timeout]).finally(() => {
-    if (timer) clearTimeout(timer);
   });
 }
 
@@ -274,9 +273,35 @@ export async function processBookPDF(filePath: string, subjectId: string, bookTi
                       },
                       required: ['question', 'options', 'correct_index', 'explanation']
                     }
+                  },
+                  exam: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        question: { type: Type.STRING },
+                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        correct_index: { type: Type.INTEGER },
+                        explanation: { type: Type.STRING }
+                      },
+                      required: ['question', 'options', 'correct_index', 'explanation']
+                    }
+                  },
+                  homework: {
+                    type: Type.ARRAY,
+                    items: {
+                      type: Type.OBJECT,
+                      properties: {
+                        question: { type: Type.STRING },
+                        options: { type: Type.ARRAY, items: { type: Type.STRING } },
+                        correct_index: { type: Type.INTEGER },
+                        explanation: { type: Type.STRING }
+                      },
+                      required: ['question', 'options', 'correct_index', 'explanation']
+                    }
                   }
                 },
-                required: ['summary', 'slides', 'diagrams', 'video_script', 'quiz']
+                required: ['summary', 'slides', 'diagrams', 'video_script', 'quiz', 'exam', 'homework']
               }
             },
             required: ['difficulty', 'duration_minutes', 'points_reward', 'coins_cost', 'content']
