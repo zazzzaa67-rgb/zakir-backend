@@ -84,7 +84,7 @@ export const chatAboutLesson = async (req: Request, res: Response) => {
             .join('\n');
 
         const response = await ai.models.generateContent({
-            model: 'gemini-2.5-flash',
+            model: 'gemini-3.6-flash',
             contents: `محتوى الدرس:\n${JSON.stringify(safeContent)}\n\nالمحادثة السابقة:\n${conversation}\n\nسؤال الطالب:\n${message}`,
             config: {
                 systemInstruction: `
