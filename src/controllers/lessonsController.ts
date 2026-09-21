@@ -79,12 +79,17 @@ export const chatAboutLesson = async (req: Request, res: Response) => {
 
         const conversation = history
             .filter((item) => item && (item.role === 'user' || item.role === 'model') && item.text)
-            .slice(-10)
+            .slice(-6) // تقليل عدد الرسائل المرفقة لتسريع المعالجة
             .map((item) => `${item.role === 'user' ? 'الطالب' : 'المعلم'}: ${item.text}`)
             .join('\n');
 
-        const response = await ai.models.generateContent({
-            model: 'gemini-3.6-flash',
+        // 1. إعداد الـ Headers لدعم إرسال الرد المباشر (Stream)
+        res.setHeader('Content-Type', 'text/plain; charset=utf-8');
+        res.setHeader('Transfer-Encoding', 'chunked');
+
+        // 2. استخدام الموديل السريع الرسمي gemini-1.5-flash ومعالجة الـ Stream
+        const responseStream = await ai.models.generateContentStream({
+            model: 'gemini-1.5-flash', // 👈 تم تعديل الاسم إلى الموديل الرسمي السريع
             contents: `محتوى الدرس:\n${JSON.stringify(safeContent)}\n\nالمحادثة السابقة:\n${conversation}\n\nسؤال الطالب:\n${message}`,
             config: {
                 systemInstruction: `
@@ -96,9 +101,18 @@ export const chatAboutLesson = async (req: Request, res: Response) => {
             },
         });
 
-        res.json({ answer: response.text || 'معلش مش قادر أجاوب دلوقتي، جرب تسألني بطريقة تانية.' });
+        // 3. إرسال الكلمات للفرونت إند أولاً بأول
+        for await (const chunk of responseStream) {
+            if (chunk.text) {
+                res.write(chunk.text);
+            }
+        }
+
+        res.end();
     } catch (error: any) {
         console.error('❌ خطأ في محادثة شرح الدرس:', error);
-        res.status(500).json({ error: error.message || 'تعذر تشغيل مدرس AI' });
+        if (!res.headersSent) {
+            res.status(500).json({ error: error.message || 'تعذر تشغيل مدرس AI' });
+        }
     }
 };
