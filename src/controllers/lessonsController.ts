@@ -93,7 +93,7 @@ export const chatAboutLesson = async (req: Request, res: Response) => {
 
         // 2. طلب الـ Stream من Gemini
         const responseStream = await ai.models.generateContentStream({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-2.5-flash',
             contents: `محتوى الدرس:\n${JSON.stringify(safeContent)}\n\nالمحادثة السابقة:\n${conversation}\n\nسؤال الطالب:\n${message}`,
             config: {
                 systemInstruction: `
