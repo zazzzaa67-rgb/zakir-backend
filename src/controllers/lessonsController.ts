@@ -2,41 +2,23 @@ import { Request, Response } from 'express';
 import { ai } from '../config/gemini.js';
 import { supabase } from '../config/supabase.js';
 export const getLessonsBySubject = async (req: Request, res: Response) => {
-    const { subject_id, track_id } = req.query;
+    const { subject_id } = req.query;
+    
     if (!subject_id) {
         return res.status(400).json({ error: 'يجب تحديد subject_id' });
     }
-    if (track_id) {
-        const { data: subjectTrack, error: trackError } = await supabase
-            .from('subject_tracks')
-            .select('subject_id')
-            .eq('track_id', track_id as string)
-            .eq('subject_id', subject_id as string)
-            .maybeSingle();
-        if (trackError) return res.status(500).json({ error: trackError.message });
-        if (!subjectTrack) {
-            const { data: fallbackSubject, error: fallbackError } = await supabase
-                .from('subjects')
-                .select('id, books!inner(id, status)')
-                .eq('id', subject_id as string)
-                .eq('books.status', 'completed')
-                .maybeSingle();
-
-            if (fallbackError) return res.status(500).json({ error: fallbackError.message });
-            if (!fallbackSubject) return res.status(404).json({ error: 'المادة غير موجودة في هذا المسار' });
-        }
-    }
-
+    // جلب الدروس مباشرة برقم المادة لتجنب أي مشاكل في الـ track_id أو الـ fallback
     const { data, error } = await supabase
         .from('lessons')
         .select('id, subject_id, book_id, unit_title, chapter_name, lesson_title, difficulty, duration_minutes, points_reward, coins_cost, order_index, generation_status, created_at, books(title, status, source_url)')
         .eq('subject_id', subject_id as string)
         .order('order_index', { ascending: true });
-
-    if (error) return res.status(500).json({ error: error.message });
-    res.json(data);
+    if (error) {
+        return res.status(500).json({ error: error.message });
+    }
+    // حتى لو كانت القائمة فارغة، نرجع مصفوفة فارغة بكود 200 لمنع ظهور شاشة الخطأ الحمراء
+    return res.json(data || []);
 };
-
 export const getLessonById = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { data, error } = await supabase
