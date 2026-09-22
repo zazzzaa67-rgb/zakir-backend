@@ -3,20 +3,25 @@ import { ai } from '../config/gemini.js';
 import { supabase } from '../config/supabase.js';
 export const getLessonsBySubject = async (req: Request, res: Response) => {
     const { subject_id } = req.query;
-    
+    console.log("📥 الـ subject_id المستلم من Frontend:", subject_id); // أضف هذا السطر
+
     if (!subject_id) {
         return res.status(400).json({ error: 'يجب تحديد subject_id' });
     }
-    // جلب الدروس مباشرة برقم المادة لتجنب أي مشاكل في الـ track_id أو الـ fallback
+
     const { data, error } = await supabase
         .from('lessons')
-        .select('id, subject_id, book_id, unit_title, chapter_name, lesson_title, difficulty, duration_minutes, points_reward, coins_cost, order_index, generation_status, created_at, books(title, status, source_url)')
-        .eq('subject_id', subject_id as string)
+        .select('*')
+        .eq('subject_id', String(subject_id).trim())
         .order('order_index', { ascending: true });
+
+    console.log("📤 الدروس الراجعة من الداتابيز:", data?.length || 0); // وأضف هذا السطر
+
     if (error) {
+        console.error("❌ خطأ الداتابيز:", error.message);
         return res.status(500).json({ error: error.message });
     }
-    // حتى لو كانت القائمة فارغة، نرجع مصفوفة فارغة بكود 200 لمنع ظهور شاشة الخطأ الحمراء
+
     return res.json(data || []);
 };
 export const getLessonById = async (req: Request, res: Response) => {
