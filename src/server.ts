@@ -6,6 +6,7 @@ import lessonsRoutes from './routes/lessonsRoutes.js';
 import subjectsRoutes from './routes/subjectsRoutes.js';
 import authRoutes from './routes/authRoutes.js';
 import teamRoutes from './routes/teamRoutes.js';
+import studentRoutes from './routes/studentRoutes.js';
 dotenv.config();
 const app = express();
 app.use(cors());
@@ -16,6 +17,7 @@ app.use('/api/subjects', subjectsRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/subjects', subjectsRoutes);
+app.use('/api/students', studentRoutes);
 if (!process.env.VERCEL) {
 	const port = Number(process.env.PORT ?? 5000);
 	app.listen(port, () => {
