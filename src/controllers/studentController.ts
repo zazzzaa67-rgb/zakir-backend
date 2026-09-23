@@ -113,3 +113,46 @@ export const getStudentErrors = async (req: Request, res: Response) => {
     return res.status(500).json({ error: 'خطأ في الخادم' });
     }
 };
+export const getLeaderboard = async (req: Request, res: Response) => {
+  try {
+    const userId = req.params.userId || (req as any).user?.id;
+
+    // 1. جلب التراك والصف الخاصين بالطالب الحالي أولاً
+    const { data: currentStudent, error: studentError } = await supabase
+      .from('student_profiles')
+      .select('grade_level, track_id')
+      .eq('id', userId)
+      .single();
+
+    if (studentError || !currentStudent) {
+      return res.status(404).json({ error: 'لم يتم العثور على بيانات الطالب الحالي' });
+    }
+
+    // 2. جلب أفضل الطلاب المشاركين في نفس الـ grade_level والـ track_id فقط
+    const { data: leaderboard, error: leaderboardError } = await supabase
+        .from('student_profiles')
+        .select('id, display_name, points')
+        .eq('grade_level', currentStudent.grade_level)
+        .eq('track_id', currentStudent.track_id)
+        .order('points', { ascending: false })
+        .limit(100);
+
+    if (leaderboardError) {
+        return res.status(400).json({ error: 'فشل في جلب قائمة المتصدرين' });
+    }
+
+    // 3. تنسيق النتائج لإعلام الواجهة إن كان هذا العنصر هو الطالب الحالي
+    const formattedLeaderboard = leaderboard.map((student, index) => ({
+        rank: index + 1,
+        id: student.id,
+        name: student.display_name || 'طالب',
+        points: student.points || 0,
+        isMe: student.id === userId,
+    }));
+
+    return res.json(formattedLeaderboard);
+    } catch (err) {
+    console.error('Error fetching filtered leaderboard:', err);
+    return res.status(500).json({ error: 'خطأ في الخادم' });
+    }
+};
