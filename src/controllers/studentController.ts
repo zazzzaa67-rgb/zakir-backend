@@ -86,7 +86,13 @@ export const submitExamResult = async (req: Request, res: Response) => {
         .single();
 
     if (updateError) {
-        return res.status(400).json({ error: 'فشل تحديث بيانات الطالب' });
+        console.error('Failed to update student exam result:', {
+            message: updateError.message,
+            details: updateError.details,
+            hint: updateError.hint,
+            code: updateError.code,
+        });
+        return res.status(500).json({ error: 'تعذر حفظ نتيجة الامتحان. حاول مرة أخرى لاحقًا.' });
     }
 
     return res.json({
