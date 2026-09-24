@@ -4,7 +4,8 @@ import { supabase } from '../config/supabase.js';
 // 1. جلب بيانات الطالب (البروفايل، النقاط، المستويات، والـ Streak)
 export const getStudentProfile = async (req: Request, res: Response) => {
     try {
-    const userId = req.params.userId || (req as any).user?.id;
+    const userId = req.studentId || req.params.userId || req.body?.userId;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
     const { data, error } = await supabase
         .from('student_profiles')
         .select('*')
@@ -36,7 +37,11 @@ export const getStudentProfile = async (req: Request, res: Response) => {
 // 2. تحديث نتيجة الامتحان، النقاط، الـ Coins، والـ Streak
 export const submitExamResult = async (req: Request, res: Response) => {
     try {
-    const { userId, isPerfectScore } = req.body; // isPerfectScore: هل قفل الامتحان؟
+    const userId = req.studentId || req.body?.userId || req.params.userId;
+    const { isPerfectScore } = req.body ?? {};
+    if (!userId || typeof isPerfectScore !== 'boolean') {
+        return res.status(400).json({ error: 'userId and boolean isPerfectScore are required' });
+    }
 
     // تحديد المكافأة بناءً على قفل الامتحان أو لا
     const earnedPoints = isPerfectScore ? 10 : 5;
@@ -99,7 +104,8 @@ export const submitExamResult = async (req: Request, res: Response) => {
 // 3. إدارة قسم الأخطاء (جلب أخطاء الطالب المسجلة)
 export const getStudentErrors = async (req: Request, res: Response) => {
     try {
-    const { userId } = req.params;
+    const userId = req.studentId || req.params.userId || req.body?.userId;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
     const { data, error } = await supabase
         .from('user_errors')
         .select('*')
@@ -115,7 +121,8 @@ export const getStudentErrors = async (req: Request, res: Response) => {
 };
 export const getLeaderboard = async (req: Request, res: Response) => {
   try {
-    const userId = req.params.userId || (req as any).user?.id;
+    const userId = req.studentId || req.params.userId || req.body?.userId;
+    if (!userId) return res.status(400).json({ error: 'userId is required' });
 
     // 1. جلب التراك والصف الخاصين بالطالب الحالي أولاً
     const { data: currentStudent, error: studentError } = await supabase

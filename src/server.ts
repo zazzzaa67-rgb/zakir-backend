@@ -9,7 +9,17 @@ import teamRoutes from './routes/teamRoutes.js';
 import studentRoutes from './routes/studentRoutes.js';
 dotenv.config();
 const app = express();
-app.use(cors());
+const allowedOrigins = new Set([
+	'https://zakir-front-end-oe9e.vercel.app',
+	'http://localhost:5173',
+	...(process.env.FRONTEND_URL ? [process.env.FRONTEND_URL] : []),
+]);
+app.use(cors({
+	origin: (origin, callback) => {
+		if (!origin || allowedOrigins.has(origin)) return callback(null, true);
+		return callback(new Error('Origin not allowed by CORS'));
+	},
+}));
 app.use(express.json());
 app.use('/api/ai', aiRoutes);
 app.use('/api/lessons', lessonsRoutes);
@@ -17,7 +27,7 @@ app.use('/api/subjects', subjectsRoutes);
 app.use('/api/auth', authRoutes);
 app.use('/api/teams', teamRoutes);
 app.use('/subjects', subjectsRoutes);
-app.use('/api/students', studentRoutes);
+app.use('/api/student', studentRoutes);
 if (!process.env.VERCEL) {
 	const port = Number(process.env.PORT ?? 5000);
 	app.listen(port, () => {
