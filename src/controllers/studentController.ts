@@ -107,6 +107,19 @@ export const submitExamResult = async (req: Request, res: Response) => {
 
 };
 
+export const buyGem = async (req: Request, res: Response) => {
+    const userId = req.studentId;
+    if (!userId) return res.status(401).json({ error: 'يجب تسجيل الدخول' });
+
+    const { data, error } = await supabase.rpc('buy_student_gem', { student_id: userId });
+    if (error) {
+        console.error('Failed to buy gem:', error.message);
+        return res.status(500).json({ error: 'تعذر شراء الجوهرة. تأكد من تطبيق تحديث قاعدة البيانات.' });
+    }
+    if (!data?.length) return res.status(400).json({ error: 'رصيدك لا يكفي لشراء جوهرة. تحتاج إلى 20 عملة.' });
+    return res.json({ coins: data[0].coins, gems: data[0].gems });
+};
+
 // 3. إدارة قسم الأخطاء (جلب أخطاء الطالب المسجلة)
 export const getStudentErrors = async (req: Request, res: Response) => {
     try {

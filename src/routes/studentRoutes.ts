@@ -4,6 +4,7 @@ import {
   submitExamResult, 
   getStudentErrors,
   getLeaderboard,
+  buyGem,
 } from '../controllers/studentController.js';
 import { requireStudent } from '../middleware/authMiddleware.js';
 
@@ -15,6 +16,7 @@ router.get('/profile/:userId', requireStudent, getStudentProfile);
 
 // مسار لتحديث نتيجة الامتحان، النقاط، الـ Coins، والـ Streak
 router.post('/exam-result', requireStudent, submitExamResult);
+router.post('/buy-gem', requireStudent, buyGem);
 
 // مسار لجلب الأخطاء الخاصة بالطالب (قسم الأخطاء)
 router.get('/errors', requireStudent, getStudentErrors);
