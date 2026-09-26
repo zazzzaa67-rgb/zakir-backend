@@ -345,7 +345,7 @@ export async function processBookPDF(filePath: string, subjectId: string, bookTi
       generatedData.content.pdf_summary_url = pdfUrl;
 
       // 💾 التخزين النهائي في Supabase
-      await supabase.from('lessons').insert([
+      const { error: lessonInsertError } = await supabase.from('lessons').insert([
         {
           subject_id: subjectId,
           book_id: bookRecord.id,
@@ -360,6 +360,9 @@ export async function processBookPDF(filePath: string, subjectId: string, bookTi
           content_json: generatedData.content
         }
       ]);
+      if (lessonInsertError) {
+        throw new Error(`Failed to save lesson "${item.lesson_title}": ${lessonInsertError.message}`);
+      }
 
       console.log(`✅ تم الانتهاء من إنشاء الدرس والتصاميم والـ PDF والفيديو بنجاح!`);
       createdCount++;
