@@ -1,6 +1,21 @@
 import { Request, Response } from 'express';
 import { supabase } from '../config/supabase.js';
 
+function cairoDateKey(date: Date) {
+    return new Intl.DateTimeFormat('en-CA', {
+        timeZone: 'Africa/Cairo',
+        year: 'numeric',
+        month: '2-digit',
+        day: '2-digit',
+    }).format(date);
+}
+
+function calendarDayDifference(fromDateKey: string, toDateKey: string) {
+    const from = Date.parse(`${fromDateKey}T00:00:00Z`);
+    const to = Date.parse(`${toDateKey}T00:00:00Z`);
+    return Math.round((to - from) / 86400000);
+}
+
 // 1. جلب بيانات الطالب (البروفايل، النقاط، المستويات، والـ Streak)
 export const getStudentProfile = async (req: Request, res: Response) => {
     try {
@@ -19,8 +34,14 @@ export const getStudentProfile = async (req: Request, res: Response) => {
     const points = data.points || 0;
     const calculatedLevel = Math.floor(points / 250) + 1;
     const pointsInCurrentLevel = points % 250;
+    const todayKey = cairoDateKey(new Date());
+    const lastActiveKey = data.last_active_date ? cairoDateKey(new Date(data.last_active_date)) : '';
+    const activeDayGap = lastActiveKey ? calendarDayDifference(lastActiveKey, todayKey) : Infinity;
+    const currentStreak = activeDayGap <= 1 ? Number(data.streak ?? 0) : 0;
+
     return res.json({
         ...data,
+        streak: currentStreak,
         level: calculatedLevel,
         points_progress: {
         current: pointsInCurrentLevel,
@@ -62,14 +83,16 @@ export const submitExamResult = async (req: Request, res: Response) => {
     const newCoins = (profile.coins || 0) + earnedCoins;
     
     // حساب الـ Streak (إذا درس اليوم يتم زيادته، وإذا قطع يوم يعود للصفر - يمكن التحقق من آخر تاريخ تفاعل)
-    const lastActiveDate = profile.last_active_date ? new Date(profile.last_active_date).toDateString() : '';
-    const today = new Date().toDateString();
-    const yesterday = new Date(Date.now() - 86400000).toDateString();
+    const now = new Date();
+    const today = cairoDateKey(now);
+    const lastActiveDate = profile.last_active_date ? cairoDateKey(new Date(profile.last_active_date)) : '';
     let newStreak = profile.streak || 0;
-    if (lastActiveDate === yesterday) {
+    if (lastActiveDate === today) {
+      // Completing more than one quiz today does not increase the daily streak.
+    } else if (lastActiveDate && calendarDayDifference(lastActiveDate, today) === 1) {
         newStreak += 1;
-    } else if (lastActiveDate !== today) {
-      newStreak = 1; // يبدأ من جديد إذا انقطع يوم أو أكثر
+    } else {
+      newStreak = 1;
     }
 
     // تحديث البيانات في قاعدة البيانات
@@ -79,7 +102,7 @@ export const submitExamResult = async (req: Request, res: Response) => {
         points: newPoints,
         coins: newCoins,
         streak: newStreak,
-        last_active_date: new Date().toISOString()
+        last_active_date: now.toISOString()
         })
         .eq('id', userId)
         .select()

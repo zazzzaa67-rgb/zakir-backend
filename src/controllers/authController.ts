@@ -3,8 +3,8 @@ import { supabase } from '../config/supabase.js';
 
 function publicProfile(profile: any) {
   if (!profile) return profile;
-  const { id, display_name, gender, grade_level, track_id, points, coins, gems } = profile;
-  return { id, display_name, gender, grade_level, track_id, points, coins, gems };
+  const { id, display_name, gender, grade_level, track_id, points, coins, gems, streak, last_active_date } = profile;
+  return { id, display_name, gender, grade_level, track_id, points, coins, gems, streak, last_active_date };
 }
 
 export const signUp = async (req: Request, res: Response) => {
