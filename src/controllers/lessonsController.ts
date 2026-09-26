@@ -3,16 +3,36 @@ import { ai } from '../config/gemini.js';
 import { supabase } from '../config/supabase.js';
 export const getLessonsBySubject = async (req: Request, res: Response) => {
     const { subject_id } = req.query;
+    const trackId = typeof req.query.track_id === 'string' ? req.query.track_id.trim() : '';
     console.log("📥 الـ subject_id المستلم من Frontend:", subject_id); // أضف هذا السطر
 
-    if (!subject_id) {
-        return res.status(400).json({ error: 'يجب تحديد subject_id' });
+    if (!subject_id || typeof subject_id !== 'string' || !trackId) {
+        return res.status(400).json({ error: 'يجب تحديد المادة والمسار الدراسي' });
     }
+
+    const { data: mapping, error: mappingError } = await supabase
+        .from('subject_tracks')
+        .select('subject_id')
+        .eq('track_id', trackId)
+        .eq('subject_id', subject_id.trim())
+        .maybeSingle();
+    if (mappingError) return res.status(500).json({ error: mappingError.message });
+    if (!mapping) return res.status(404).json({ error: 'المادة دي مش ضمن المسار الدراسي المحدد' });
+
+    const { data: books, error: booksError } = await supabase
+        .from('books')
+        .select('id')
+        .eq('subject_id', subject_id.trim())
+        .or(`track_id.is.null,track_id.eq.${trackId}`);
+    if (booksError) return res.status(500).json({ error: booksError.message });
+    const bookIds = (books ?? []).map((book: { id: string }) => book.id);
+    if (bookIds.length === 0) return res.json([]);
 
     const { data, error } = await supabase
         .from('lessons')
         .select('*')
-        .eq('subject_id', String(subject_id).trim())
+        .eq('subject_id', subject_id.trim())
+        .in('book_id', bookIds)
         .order('order_index', { ascending: true });
 
     console.log("📤 الدروس الراجعة من الداتابيز:", data?.length || 0); // وأضف هذا السطر

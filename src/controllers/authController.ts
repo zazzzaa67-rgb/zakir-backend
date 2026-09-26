@@ -21,7 +21,12 @@ export const signUp = async (req: Request, res: Response) => {
     if (Number(gradeLevel) === 1 && trackId !== 'general_1st') {
       return res.status(400).json({ error: 'الصف الأول الثانوي يستخدم المسار العام' });
     }
-    if (Number(gradeLevel) > 1 && !String(trackId).endsWith(`_${gradeLevel}nd`) && !String(trackId).endsWith(`_${gradeLevel}rd`)) {
+    const allowedTracks: Record<number, string[]> = {
+      1: ['general_1st'],
+      2: ['medicine_2nd', 'engineering_2nd', 'business_2nd', 'arts_2nd'],
+      3: ['scientific_science_3rd', 'scientific_math_3rd', 'literary_3rd'],
+    };
+    if (!allowedTracks[Number(gradeLevel)]?.includes(String(trackId))) {
       return res.status(400).json({ error: 'المسار لا يناسب الصف المختار' });
     }
 
