@@ -44,6 +44,40 @@ export const getLessonsBySubject = async (req: Request, res: Response) => {
 
     return res.json(data || []);
 };
+export const getPublicSampleLessons = async (_req: Request, res: Response) => {
+    try {
+        const { data: subjects, error: subjectsError } = await supabase
+            .from('subjects').select('id, title, grade_level').in('grade_level', [1, 2, 3]);
+        if (subjectsError) return res.status(500).json({ error: subjectsError.message });
+        const subjectIds = (subjects ?? []).map((subject: any) => subject.id);
+        if (!subjectIds.length) return res.json([]);
+        const { data: books, error: booksError } = await supabase
+            .from('books').select('id, title, subject_id, status').in('subject_id', subjectIds);
+        if (booksError) return res.status(500).json({ error: booksError.message });
+        const readyBooks = (books ?? []).filter((book: any) => !book.status || ['completed', 'ready', 'processed'].includes(String(book.status).toLowerCase()));
+        const samplesByGrade = await Promise.all([1, 2, 3].map(async (gradeLevel) => {
+            const gradeSubjects = (subjects ?? []).filter((subject: any) => subject.grade_level === gradeLevel);
+            const subjectIdsForGrade = new Set(gradeSubjects.map((subject: any) => subject.id));
+            const gradeBooks = readyBooks.filter((book: any) => subjectIdsForGrade.has(book.subject_id));
+            if (!gradeBooks.length) return null;
+            const { data: lessons, error: lessonsError } = await supabase.from('lessons').select('*')
+                .in('subject_id', [...subjectIdsForGrade]).in('book_id', gradeBooks.map((book: any) => book.id))
+                .not('content_json', 'is', null).order('order_index', { ascending: true }).limit(1);
+            if (lessonsError) throw lessonsError;
+            const lesson = lessons?.[0];
+            if (!lesson) return null;
+            const subject = gradeSubjects.find((item: any) => item.id === lesson.subject_id);
+            const book = gradeBooks.find((item: any) => item.id === lesson.book_id);
+            return { ...lesson, grade_level: gradeLevel, subject_title: subject?.title ?? '', book_title: book?.title ?? '' };
+        }));
+        const samples = samplesByGrade.filter(Boolean);
+        res.setHeader('Cache-Control', 'public, max-age=3600, stale-while-revalidate=86400');
+        return res.json(samples);
+    } catch (error: any) {
+        return res.status(500).json({ error: error.message || 'Unable to load public sample lessons' });
+    }
+};
+
 export const getLessonById = async (req: Request, res: Response) => {
     const { id } = req.params;
     const { data, error } = await supabase
