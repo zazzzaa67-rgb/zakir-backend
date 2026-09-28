@@ -13,7 +13,7 @@ export const getSubjectsByTrack = async (req: Request, res: Response) => {
       .eq('id', trackId)
       .maybeSingle();
     if (trackLookupError) return res.status(500).json({ error: trackLookupError.message });
-    if (!track) return res.status(404).json({ error: 'المسار الدراسي غير معروف' });
+    const trackMissing = !track;
 
     if (trackId === 'business_3rd' || trackId === 'arts_3rd') {
       return res.status(404).json({ error: 'This third-grade track is not available.' });
@@ -42,6 +42,7 @@ export const getSubjectsByTrack = async (req: Request, res: Response) => {
 
     const subjectIds = [...new Set((trackRows ?? []).map((row: any) => row.subject_id))];
     if (subjectIds.length === 0) {
+      if (trackMissing) return res.status(404).json({ error: 'المسار الدراسي غير معروف' });
       return res.status(409).json({ error: `لا توجد مواد مرتبطة بالمسار ${trackId}. طبّق migration 008 في مشروع Supabase المستخدم من الموقع.` });
     }
     let subjects: any[] = [];
