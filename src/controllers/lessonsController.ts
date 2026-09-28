@@ -56,7 +56,7 @@ export const getPublicSampleLessons = async (_req: Request, res: Response) => {
         if (booksError) return res.status(500).json({ error: booksError.message });
         const readyBooks = (books ?? []).filter((book: any) => !book.status || ['completed', 'ready', 'processed'].includes(String(book.status).toLowerCase()));
         const samplesByGrade = await Promise.all([1, 2, 3].map(async (gradeLevel) => {
-            const gradeSubjects = (subjects ?? []).filter((subject: any) => subject.grade_level === gradeLevel);
+            const gradeSubjects = (subjects ?? []).filter((subject: any) => Number(subject.grade_level) === gradeLevel);
             const subjectIdsForGrade = new Set(gradeSubjects.map((subject: any) => subject.id));
             const gradeBooks = readyBooks.filter((book: any) => subjectIdsForGrade.has(book.subject_id));
             if (!gradeBooks.length) return null;
