@@ -12,7 +12,7 @@ export const getTeam = async (req: Request, res: Response) => {
   if (!membership) return res.json({ team: null, invitations: [] });
   const { data: team, error } = await supabase.from('study_teams').select('id,name,gender,owner_id,created_at,study_team_members(student_id,joined_at,student_profiles(display_name,points))').eq('id', membership.team_id).single();
   if (error) return res.status(500).json({ error: error.message });
-  return res.json({ team, invitations: [] });
+  return res.json({ team: { ...team, isOwner: team.owner_id === id }, invitations: [] });
 };
 
 export const getInvitations = async (req: Request, res: Response) => {
@@ -28,16 +28,15 @@ export const createTeam = async (req: Request, res: Response) => {
   const name = String(req.body?.name ?? '').trim();
   if (!id) return res.status(401).json({ error: 'يجب تسجيل الدخول' });
   if (!name) return res.status(400).json({ error: 'اسم الفريق مطلوب' });
-  const { data: profile } = await supabase.from('student_profiles').select('gender').eq('id', id).single();
-  if (!profile) return res.status(404).json({ error: 'ملف الطالب غير موجود' });
-  const { data: team, error } = await supabase.from('study_teams').insert({ name, gender: profile.gender, owner_id: id }).select().single();
-  if (error) return res.status(400).json({ error: error.message });
-  const { error: memberError } = await supabase.from('study_team_members').insert({ team_id: team.id, student_id: id });
-  if (memberError) {
-    await supabase.from('study_teams').delete().eq('id', team.id);
-    return res.status(400).json({ error: memberError.message });
+  const { data, error } = await supabase.rpc('create_study_team', { p_student_id: id, p_name: name });
+  if (error) {
+    const message = error.message ?? '';
+    if (message.includes('300')) return res.status(400).json({ error: 'تحتاج إلى 300 نقطة على الأقل لإنشاء فرقة' });
+    if (message.includes('20')) return res.status(400).json({ error: 'إنشاء الفرقة يحتاج إلى 20 عملة' });
+    if (message.includes('فريق') || message.includes('فرقة')) return res.status(400).json({ error: message });
+    return res.status(400).json({ error: message });
   }
-  return res.status(201).json({ team });
+  return res.status(201).json({ team: data?.[0] ?? data });
 };
 
 export const inviteToTeam = async (req: Request, res: Response) => {
