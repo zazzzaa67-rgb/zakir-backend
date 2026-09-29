@@ -58,13 +58,14 @@ export const getStudentProfile = async (req: Request, res: Response) => {
 // 2. تحديث نتيجة الامتحان، النقاط، الـ Coins، والـ Streak
 export const submitExamResult = async (req: Request, res: Response) => {
     try {
-    const userId = req.studentId || req.body?.userId || req.params.userId;
-    const { isPerfectScore } = req.body ?? {};
-    if (!userId || typeof isPerfectScore !== 'boolean') {
-        return res.status(400).json({ error: 'userId and boolean isPerfectScore are required' });
+    const userId = req.studentId;
+    const { score, totalQuestions } = req.body ?? {};
+    if (!userId) return res.status(401).json({ error: 'يجب تسجيل الدخول' });
+    if (!Number.isInteger(score) || !Number.isInteger(totalQuestions) || totalQuestions < 1 || score < 0 || score > totalQuestions) {
+        return res.status(400).json({ error: 'درجة الامتحان غير صحيحة' });
     }
 
-    // تحديد المكافأة بناءً على قفل الامتحان أو لا
+    const isPerfectScore = score === totalQuestions;
     const earnedPoints = isPerfectScore ? 10 : 5;
     const earnedCoins = isPerfectScore ? 5 : 3;
 
@@ -120,6 +121,7 @@ export const submitExamResult = async (req: Request, res: Response) => {
 
     return res.json({
         message: 'تم تحديث النتيجة بنجاح',
+        examResult: { score, totalQuestions, percentage: Math.round((score / totalQuestions) * 100) },
         earned: { points: earnedPoints, coins: earnedCoins },
         profile: updatedData
     });
